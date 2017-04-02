@@ -1,5 +1,4 @@
 <?php
-session_start();
 /**
  * The PHP norm form is used to gather, validate and process form data in a flexible way.
  *
@@ -16,6 +15,8 @@ session_start();
  * @author Martin Harrer <martin.harrer@fh-hagenberg.at>
  * @version 2017
  */
+
+session_start();
 
 require_once("variables.inc.php");
 
@@ -56,7 +57,9 @@ function is_valid_form(): bool
 {
     global $error_messages;
 
-//// hier gehts los
+    /**
+     * Checks if the input is a valid number between current lower and upper limit
+     */
     $validation_result = filter_input(
         INPUT_POST,
         NUMBER,
@@ -67,7 +70,6 @@ function is_valid_form(): bool
     if ($validation_result === false) {
         $error_messages[NUMBER] = "Please enter an integer between " . $_SESSION[LOWER_LIMIT] . " and " . $_SESSION[UPPER_LIMIT] . ".";
     }
-//*/ // hier hörts auf
 
     return !isset($error_messages);
 }
@@ -94,26 +96,28 @@ function process_form()
 
     $_SESSION[GUESSES]++;
 
-    if($_POST[])
-    {
+    if($_POST[NUMBER] < $_SESSION[NUMBER]) {
+        $result["message"] = $_POST[NUMBER] . " was too low. Guess again.";
         $_SESSION[LOWER_LIMIT] = $_POST[NUMBER] + 1;
     } elseif ($_POST[NUMBER] > $_SESSION[NUMBER]){
         $result["message"] = $_POST[NUMBER] . " was too high. Guess again.";
         $_SESSION[UPPER_LIMIT] = $_POST[NUMBER] - 1;
     } else {
-        $result["message"] = "Congratulations! You've guessed the number " . $_SESSION[NUMBER] . " after " . $_SESSION[GUESSES] . "attempts.";
-        if ($_SESSION[GUESSES] < 4) {
-            $result["message"] .= " You did great!";
-        } elseif ($_SESSION[GUESSES] < 8) {
+        $result["message"] = "Congratulations! You've guessed the number " . $_SESSION[NUMBER] . " after " . $_SESSION[GUESSES] . " attempts.";
+        if ($_SESSION[GUESSES] < 5) {
+            $result["message"] .= " That was fast!";
+        } elseif ($_SESSION[GUESSES] < 10) {
             $result["message"] .= " That was okay.";
         } else {
-            $result["message"] .= " You weren't so lucky this time.";
+            $result["message"] .= " That was bad. Try better next time.";
         }
 
-        /**  load_contents(); */
-        /**  add_entry(); */
-        $result[HIGHSCORE] = $_SESSION[HIGHSCORE];
-        /**  store_contents(); */
+        load_contents();
+        add_entry();
+        store_contents();
+        printEntries();
+
+        resetVars();
     }
 }
 
@@ -175,24 +179,105 @@ function generate_result()
     global $result_fragment;
 
     if (isset($result)) {
-        $result_fragment = "<table class=\"Table u-tableW100\">" . PHP_EOL;
-        $result_fragment .= "<colgroup span=\"2\" class=\"u-tableW50\"></colgroup>" . PHP_EOL;
-        $result_fragment .= "<thead>" . PHP_EOL;
-        $result_fragment .= "<tr class=\"Table-row\">" . PHP_EOL;
-        $result_fragment .= "<th class=\"Table-header\">Key</th>" . PHP_EOL;
-        $result_fragment .= "<th class=\"Table-header\">Value</th>" . PHP_EOL;
-        $result_fragment .= "</tr>" . PHP_EOL;
-        $result_fragment .= "</thead>" . PHP_EOL;
-        $result_fragment .= "<tbody>" . PHP_EOL;
         foreach ($result as $key => $value) {
-            $result_fragment .= "<tr class=\"Table-row\">" . PHP_EOL;
-            $result_fragment .= "<td class=\"Table-data\">$key</td>" . PHP_EOL;
-            $result_fragment .= "<td class=\"Table-data\">" . nl2br(sanitize_filter($value)) . "</td>" . PHP_EOL;
-            $result_fragment .= "</tr>" . PHP_EOL;
+            $result_fragment .= "<div class=\"Container\">" . PHP_EOL;
+            $result_fragment .= "<p class=\"Container-message\">$value</p>" . PHP_EOL;
+            $result_fragment .= "</div>" . PHP_EOL;
         }
-        $result_fragment .= "</tbody>" . PHP_EOL;
-        $result_fragment .= "</table>" . PHP_EOL;
     }
+}
+
+/**
+ * Loads all stored high_scores line by line if file exist
+ */
+function load_contents()
+{
+    if(file_exists(FILE)) {
+        $fp = fopen(FILE, 'r');
+
+        $index = 0;
+        while (($line = fgets($fp)) !== false) {
+            $_SESSION[HIGHSCORE][$index] = $line;
+            $index++;
+        }
+    }
+}
+
+/**
+ * Stores all high_scores + the new one into the file if it exists, if not it will create a new file
+ */
+function store_contents()
+{
+    if (!file_exists(FILE)) {
+        $fp = fopen(FILE, "w");
+    } else {
+        $fp = fopen(FILE, "r+");
+    }
+    $lock = flock($fp, LOCK_EX);
+    if ($lock) {
+        ftruncate($fp, 0);
+        foreach ($_SESSION[HIGHSCORE] as $line) {
+            fwrite($fp, $line);
+        }
+        flock($fp, LOCK_UN);
+        fclose($fp);
+    }
+    load_contents();
+}
+
+/**
+ * prints out all high_score in a table sorted by the lowest number of trys
+ */
+function printEntries()
+{
+    global $high_score_fragment;
+
+    $high_score_fragment = "<h3 class=\"Section-heading\">High-Score</h3>";
+    $high_score_fragment .= "<table class=\"Table u-tableW100\">" . PHP_EOL;
+    $high_score_fragment .= "<thead>" . PHP_EOL;
+    $high_score_fragment .= "<tr class=\"Table-row\">" . PHP_EOL;
+    $high_score_fragment .= "<th class=\"Table-header\">Attempts</th>" . PHP_EOL;
+    $high_score_fragment .= "<th class=\"Table-header\">Number</th>" . PHP_EOL;
+    $high_score_fragment .= "<th class=\"Table-header\">Date</th>" . PHP_EOL;
+    $high_score_fragment .= "<th class=\"Table-header\">Time</th>" . PHP_EOL;
+    $high_score_fragment .= "</tr>" . PHP_EOL;
+    $high_score_fragment .= "</thead>" . PHP_EOL;
+    $high_score_fragment .= "<tbody>" . PHP_EOL;
+
+    $index = 0;
+    while($index < sizeof($_SESSION[HIGHSCORE])) {
+        $high = explode("|", $_SESSION[HIGHSCORE][$index]);
+        $high_score_fragment .= "<tr class=\"Table-row\">" . PHP_EOL;
+        $high_score_fragment .= "<td class=\"Table-data\">$high[0]</td>" . PHP_EOL;
+        $high_score_fragment .= "<td class=\"Table-data\">$high[1]</td>" . PHP_EOL;
+        $high_score_fragment .= "<td class=\"Table-data\">$high[2]</td>" . PHP_EOL;
+        $high_score_fragment .= "<td class=\"Table-data\">$high[3]</td>" . PHP_EOL;
+        $high_score_fragment .= "</tr>" . PHP_EOL;
+        $index++;
+    }
+    $high_score_fragment .= "</tbody>" . PHP_EOL;
+    $high_score_fragment .= "</table>" . PHP_EOL;
+}
+
+/**
+ * Adds the last played game in the global variable and sorts it by the lowest number of trys
+ */
+function add_entry()
+{
+    array_push($_SESSION[HIGHSCORE], $_SESSION[GUESSES] . '|' . $_SESSION[NUMBER] . '|' . date("d.m.Y") . '|' . date("H:i:s") . PHP_EOL);
+    natsort($_SESSION[HIGHSCORE]);
+}
+
+/**
+ * Resets all current variables and determines a new random number in order to start a new game
+ */
+function resetVars()
+{
+    $_SESSION[NUMBER] = mt_rand(MIN, MAX);
+    $_SESSION[LOWER_LIMIT] = MIN;
+    $_SESSION[UPPER_LIMIT] = MAX;
+    $_SESSION[GUESSES] = 0;
+    $_SESSION[HIGHSCORE] = [];
 }
 
 /**
@@ -204,6 +289,7 @@ function display()
     global $error_fragment;
     global $status_fragment;
     global $result_fragment;
+    global $high_score_fragment;
 
     if(!is_form_submission()) {
         $_SESSION[NUMBER] = mt_rand(MIN, MAX);
@@ -218,13 +304,6 @@ function display()
     $lower_limit = $_SESSION[LOWER_LIMIT];
     $upper_limit = $_SESSION[UPPER_LIMIT];
     $guesses = $_SESSION[GUESSES];
-
-    // Upon successful processing the values from the form fields are being emptied.
-    if (isset($error_fragment)) {
-        $number_value = autofill_form_field(NUMBER);
-    } else {
-        $number_value = null;
-    }
 
     // The HEREDOC syntax is used to store the markup for the whole page in a string.
     $page = <<<PAGE
@@ -257,8 +336,7 @@ function display()
                         <div class="Grid Grid--gutters">
                             <div class="InputCombo Grid-full">
                                 <label for="$number_key" class="InputCombo-label">Your Guess*:</label>
-                                <input type="number" id="$number_key" name="$number_key"
-                                       value="$number_value" class="InputCombo-field">
+                                <input type="text" id="$number_key" name="$number_key" class="InputCombo-field">
                             </div>
                             <div class="Grid-full">
                                 <button type="submit" class="Button">Guess</button>
@@ -269,10 +347,11 @@ function display()
             </section>
             <section class="Section">
                 <div class="Container">
-                    <h2 class="Section-heading">Result in \$_POST</h2>
-                    $guesses
+                    <h2 class="Section-heading">Guessing results</h2>
+                    <p>Attempts: $guesses</p>
                     $result_fragment
-                    $script_name
+                    $high_score_fragment
+                    <p><a href="index.php">Start new game</a></p>
                 </div>
             </section>
         </main> 
